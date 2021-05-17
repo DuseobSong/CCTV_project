@@ -36,10 +36,10 @@
 #define initX 331 * RESOLUTION_VAL
 #define initY 271 * RESOLUTION_VAL
 #define frequency 50 * RESOLUTION_VAL
-#define X_MIN 190 * RESOLUTION_VAL
-#define X_MAX 470 * RESOLUTION_VAL
-#define Y_MIN 175 * RESOLUTION_VAL
-#define Y_MAX 320 * RESOLUTION_VAL
+#define X_MIN 190 * RESOLUTION_VAL // 570
+#define X_MAX 470 * RESOLUTION_VAL // 1410
+#define Y_MIN 175 * RESOLUTION_VAL // 525
+#define Y_MAX 320 * RESOLUTION_VAL // 960
 
 
 // Sensors

@@ -12,6 +12,10 @@ class Direction(Enum):
     Right = 1
     Up = 2
     Down = 3
+    LeftUp = 4
+    LeftDown = 5
+    RightUp = 6
+    RightDown = 7
 
 class Joystick(QWidget):
     def __init__(self, parent=None):
@@ -51,12 +55,20 @@ class Joystick(QWidget):
         angle = normVector.angle()
 
         distance = min(currentDistance/ self.__maxDistance, 1.0)
-        if 45 <= angle < 135:
-            return(Direction.Up, distance)
-        elif 135 <= angle < 225:
+        if 22.5 <= angle < 67.5:
+            return (Direction.RightUp, distance)
+        elif 67.5 <= angle < 112.5:
+            return (Direction.Up, distance)
+        elif 112.5 <= angle < 157.5:
+            return (Direction.LeftUp, distance)
+        elif 157.5 <= angle < 202.5:
             return (Direction.Left, distance)
-        elif 225 <= angle < 315:
+        elif 202.5 <= angle < 247.5:
+            return (Direction.LeftDown, distance)
+        elif 247.5 <= angle < 292.5:
             return (Direction.Down, distance)
+        elif 292.5 <= angle < 337.5:
+            return (Direction.RightDown, distance)
         return (Direction.Right, distance)
 
     def mousePressEvent(self, ev):

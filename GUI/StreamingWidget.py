@@ -202,6 +202,23 @@ class CtrlButton(QPushButton):
         self.width = 50
         self.height = 50
 
+class CameraControl(QWidget):
+    signal_send_cmd = pyqtSignal(str, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.joystick = Control(self)
+        self.client = CLIENT()
+        self.joystick.joystick.send_cmd.connect(self.pub_msg)
+        self.client.start()
+        self.setGeometry(115, 160, 150, 150)
+        self.joystick.start()
+
+    @pyqtSlot(int, int)
+    def pub_msg(self, x, y):
+        self.client.client.publish('server/cmd',
+                                   "{'x': %d, 'y':%d}"%(x, y))
+
 class ControlPanel(QFrame):
     def __init__(self, num_camera, parent=None):
         super().__init__(parent)
@@ -218,8 +235,13 @@ class ControlPanel(QFrame):
         self.setFrameShadow(QFrame.Raised)
         self.buttons = [CamButton(self) for _ in range(9)]
         self.status_colors = [StatusColor(self) for _ in range(9)]
-        self.ctrl_btns = [CtrlButton(self) for _ in range(4)]
 
+        self.joystick_usage = True
+        if self.joystick_usage == False:
+            self.ctrl_btns = [CtrlButton(self) for _ in range(4)]
+        else:
+            self.joystick = CameraControl(self)
+            self.joystick.show()
         self.setButtons()
 
     def setButtons(self):

@@ -1,11 +1,15 @@
 import sys, cv2, imagezmq, socket, requests, pickle
 from io import BytesIO
+import time
 import numpy as np
 from enum import Enum
 from PyQt5.QtCore import QThread, Qt, pyqtSignal, pyqtSlot, QPointF, QPoint, QRectF, QLineF
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtGui import QImage, QPixmap, QPainter
-
+import pymysql
+import pandas as pd
+import matplotlib.pyplot as plt
+import paho.mqtt.client as mqtt
 
 # classes for video streaming
 class Streaming(QThread):
@@ -143,6 +147,7 @@ class Direction(Enum):
     LeftDown = 5
     RightUp = 6
     RightDown = 7
+    Neutral = -1
 
 class Joystick(QWidget):
     send_cmd = pyqtSignal(int, int)
@@ -152,13 +157,19 @@ class Joystick(QWidget):
         self.setMinimumSize(150, 150)
         self.moving_offset=(QPoint(0, 0))
         self.grab_center = False
-        self.__max_distance = 70
+        self.__max_distance = 55
         self.init_pwm_x = 993
         self.init_pwn_y = 813
         self.cur_pwm_x = self.init_pwm_x
         self.cur_pwm_y = self.init_pwm_y
         self.prev_pwm_x = self.init_pwm_x
         self.prev_pwm_y = self.init_pwm_y
+        self.min_x = 570
+        self.max_x = 1410
+        self.min_y = 525
+        self.max_y = 960
+        self.setGeometry(0, 0, 150, 150)
+        self.pressed = False
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -191,48 +202,153 @@ class Joystick(QWidget):
         angle = norm_vector.angle()
 
         distance = min(current_distance / self.__max_distance, 1.0)
-        if 22.5 <= angle < 67.5:
-
-            return (Direction.RightUp, distance)
-        elif 67.5 <= angle < 112.5:
-            return (Direction.up, distance)
-        elif 112.5 <= angle < 157.5:
-            return (Direction.LeftUp, distance)
-        elif 157.5 <= angle < 202.5:
-            return (Direction.Left, distance)
-        elif 202.5 <= angle < 247.5:
-            return (Direction.LeftDown, distance)
-        elif 247.5 <= angle < 292.5:
-            return (Direction.Down, distance)
-        elif 292.5 <= angle < 337.5:
-            return (Direction.RigntDown, distance)
-        return (Direction.Right, distance)
+        if current_distance > 30:
+            if 22.5 <= angle < 67.5:
+                self.calc_pwm(1, 1)
+                return (Direction.RightUp, distance)
+            elif 67.5 <= angle < 112.5:
+                self.calc_pwm(0, 1)
+                return (Direction.Up, distance)
+            elif 112.5 <= angle < 157.5:
+                self.calc_pwm(-1, 1)
+                return (Direction.LeftUp, distance)
+            elif 157.5 <= angle < 202.5:
+                self.calc_pwm(-1, 0)
+                return (Direction.Left, distance)
+            elif 202.5 <= angle < 247.5:
+                self.calc_pwm(-1, -1)
+                return (Direction.LeftDown, distance)
+            elif 247.5 <= angle < 292.5:
+                self.calc_pwm(0, -1)
+                return (Direction.Down, distance)
+            elif 292.5 <= angle < 337.5:
+                self.calc_pwm(1, -1)
+                return (Direction.RightDown, distance)
+            else:
+                self.calc_pwm(1, 0)
+                return (Direction.Right, distance)
+        else:
+            return (Direction.Neutral, 0)
 
     def mousePressEvent(self, ev):
         self.grab_center = self._center_ellipse().contains(ev.pos())
+        self.pressed = True
         return super().mousePressEvent(ev)
 
     def mouseReleaseEvent(self, event):
         self.grab_center = False
         self.moving_offset = QPointF(0, 0)
         self.update()
+        self.pressed = False
 
     def mouseMoveEvent(self, event):
         if self.grab_center:
-            print("Moving")
+            #print("Moving")
             self.moving_offset = self._bound_joystick(event.pos())
             self.update()
-        print(self.joystick_direction())
+        #print(self.joystick_direction())
 
-class CameraControl(QThread):
-    def __init__(self, parent=None):
-        super().__init__()
-        self.joystick = Joystick(self)
+    def calc_pwm(self, xdiff, ydiff):
+        if(self.cur_pwm_x + xdiff <= self.min_x):
+            new_x = self.min_x
+        elif(self.min_x <= self.cur_pwm_x + xdiff <= self.max_x):
+            new_x = self.cur_pwm_x + xdiff
+        else:
+            new_x = self.max_x
+
+        if (self.cur_pwm_y + ydiff <= self.min_y):
+            new_y = self.min_y
+        elif (self.min_y <= self.cur_pwm_y + ydiff <= self.max_y):
+            new_y = self.cur_pwm_y + ydiff
+        else:
+            new_y = self.max_y
+
+        print(new_x, new_y)
+        self.cur_pwm_x = new_x
+        self.cur_pwm_y = new_y
+        self.send_cmd.emit(new_x, new_y)
+
+class CLIENT(QThread):
+    client = mqtt.Client('server')
+    broker = '192.168.10.51'
+    port = 1883
+    #self.client.connect(self.broker, self.port)
+
+    def set_broker(self, broker_ip):
+        self.broker = broker_ip
+
+    def set_port(self, port):
+        self.port = port
 
     def run(self):
-        pass
+        self.client.connect(self.broker, self.port)
+        self.client.publish('server/info', '[SERVER] connected')
+        while True:
+            self.client.loop_start()
+            self.client.subscribe('esp32_controller/response')
 
-    @pyqtSlot(int, int)
-    def send_ctrl_cmd(self, x, y):
-        pass
+            self.client.loop_stop()
 
+class Control(QThread):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.joystick = Joystick(parent)
+
+    def run(self):
+        while True:
+            if self.joystick.pressed==True:
+                self.joystick.joystick_direction()
+                time.sleep(0.1)
+
+'''
+class DataRetrive(QThread):
+    signal_send_dht_data = pyqtSignal(dict)
+    signal_sned_ill_data = pyqtSignal(dict)
+
+    HOST = '192.168.10.51'
+    USER = 'server'
+    PSWD = 'server'
+    DB = 'Project'
+    CHST = 'uft8mb4'
+
+    connect = pymysql.connect(host=HOST, user=USER, password=PSWD, db=DB, charset=CHST)
+    cur = connect.cursor()
+
+    def set_host(self, host):
+        self.HOST = host
+
+    def set_user(self, user):
+        self.USER = user
+
+    def set_pswd(self, pswd):
+        self.PSWD = pswd
+
+    def set_db(self, db):
+        self.DB = db
+
+    def run(self):
+        query = 'SELECT * FROM sensor_data'
+        while True:
+            self.cur.excute(query)
+            self.connect.commit()
+            data = self.cur.fetchall()
+            data = pd.DataFrame(data)
+
+            timestamp = None
+            temperature = None
+            humidity = None
+            illuminance = None
+
+            dht_data = {'time'        : timestamp,
+                        'temperature' : temperature,
+                        'humidity'    : humidity
+                        }
+
+            ill_data = {'time'        : time,
+                        'illuminance' : illuminance
+                        }
+            self.signal_send_dht_data(dht_data)
+            self.signal_sned_ill_data(ill_data)
+
+            time.sleep(5)
+            '''
