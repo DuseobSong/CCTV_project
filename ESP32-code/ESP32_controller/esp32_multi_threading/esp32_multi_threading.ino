@@ -11,6 +11,7 @@
  *  - esp32_sensor/msg          [ESP32_SENSOR]
  *  
  * 2. Controller
+ * 
  *  - esp32_controller/msg      [ESP32_CONTROLLER]
  *  - esp32_controller/response [ESP32_CONTROLLER]
  *  - server/cmd                [SERVER]
@@ -41,7 +42,6 @@
 #define Y_MIN 175 * RESOLUTION_VAL // 525
 #define Y_MAX 320 * RESOLUTION_VAL // 960
 
-
 // Sensors
 DHTesp dht;
 
@@ -50,6 +50,7 @@ const char* ssid = "YIIT_DEV2G";
 const char* pswd = "0535551333";
 const char* mqtt_server = "192.168.10.51";
 const int mqtt_port = 1883;
+const int cam_no = 1;
 WiFiClient mqttClient;
 PubSubClient mqtt_client(mqttClient);
 
@@ -97,17 +98,17 @@ void connection_init() {
   SQL.toCharArray(SQL_, SQL.length());
   while(true){
     if(conn.connect(sql_server_addr, 3306, "controller", "controller")){
-      Serial.println("[ESP32_CONTROLLER] DB Connected.");
+      Serial.println("[ESP32_CONTROLLER_1] DB Connected.");
       break;
     }else{
-      Serial.println("[ESP32_CONTROLLER] DB Connection failed. Retry in a few seconds.");
+      Serial.println("[ESP32_CONTROLLER_1] DB Connection failed. Retry in a few seconds.");
       delay(200);
       continue;
     }
     MySQL_Cursor *cur_mem = new MySQL_Cursor(&conn);
     cur_mem->execute(SQL_);
     delete cur_mem;
-    Serial.println("[ESP32_CONTROLLER] IP address updated.");
+    Serial.println("[ESP32_CONTROLLER_1] IP address updated.");
   }
 }
 
@@ -145,7 +146,7 @@ static void sendData(void *param) {
   
       delete cur_mem;
       Serial.println("[SQL] Closing connection\n");
-      mqtt_client.publish("esp32_sensor/msg", "[ESP32_SENSOR] Sensor data updated.");
+      mqtt_client.publish("esp32_sensor_1/msg", "[ESP32_SENSOR_1] Sensor data updated.");
       delay(10*1000);
   }
   vTaskDelete(NULL);
@@ -167,10 +168,10 @@ void pwm_setup(){
 void reconnect(){
   while(!mqtt_client.connected()){
     Serial.print("[MQTT] Connecting to MQTT-broker...");
-    if(mqtt_client.connect("ESP32_controller")){
+    if(mqtt_client.connect("ESP32_controller_1")){
       Serial.println("[MQTT] Connected");
-      mqtt_client.publish("esp32_controller/msg", "[ESP32_CONTROLLER]connected");
-      mqtt_client.subscribe("server/cmd");
+      mqtt_client.publish("esp32_controller_1/msg", "[ESP32_CONTROLLER_1]connected");
+      mqtt_client.subscribe("server/esp32_controller_1/cmd");
       mqtt_client.subscribe("server/response");
     }else{
       Serial.print("[MQTT] Connetion failed, rc = ");
@@ -182,7 +183,6 @@ void reconnect(){
 }
 
 void callback(char* topic, byte* payload, unsigned int length){
-  // Control mesasge : [12 byte] "x_val,y_val" -> ex: "0123,0135"
   Serial.println("[Client] Message received");
   Serial.print("Topic: ");
   Serial.println(topic);
@@ -196,12 +196,13 @@ void callback(char* topic, byte* payload, unsigned int length){
   JsonObject& parsed = json_buffer.parseObject(payload);
   if(!parsed.success()){
     Serial.println("[MQTT] MSG parsing failed.");
-    mqtt_client.publish("esp32_controller/response", "[ESP32_CONTROLLER] Parsing failed.");
+    mqtt_client.publish("esp32_controller_1/response", "[ESP32_CONTROLLER_1] Parsing failed.");
     return;
   }
+  //int idx = parsed["idx"];
   int recv_x = parsed["x"];
   int recv_y = parsed["y"];
-
+  
   if(recv_x <= X_MIN){
     target_x = X_MIN;
   }else if(recv_x >= X_MAX){
@@ -229,7 +230,8 @@ void callback(char* topic, byte* payload, unsigned int length){
   Serial.print(target_y);
   Serial.println(" ]");
   
-  mqtt_client.publish("esp32_controller/response", "[ESP32_CONTROLLER] Transmission OK.");
+  mqtt_client.publish("esp32_controller_1/response", "[ESP32_CONTROLLER_1] Transmission OK.");
+
 }
 
 static void recvMsg(void *param) {

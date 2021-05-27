@@ -1,0 +1,95 @@
+import cv2
+import socket
+import math
+import pickle
+import pymysql
+import time
+import paho.mqtt.client as mqtt
+
+def get_ip():
+    tmp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tmp_sock.connect(('pwnbit.kr', 443))
+    return tmp_sock.getsockname()[0]
+
+def on_message(client, userdata, msg):
+    print(f"Received '{msg.payload.decode()}' from '{msg.topic}'")
+    topic = msg.topic
+    global udp_port
+    global server_ip
+
+    udp_port, server_ip = msg.payload.decode().split(', ')
+
+max_length = 65000
+cam_no = 4
+server_ip = None
+udp_port = None
+camera_ip = get_ip()
+im_size = (400, 300)
+broker_ip = '192.168.10.51'
+mqtt_port = 1883
+
+# MySQL Database - update camera information
+connect = pymysql.connect(host=broker_ip, user='camera', password='camera', db='Project', charset='utf8')
+cur = connect.cursor()
+sql = "UPDATE camera_info set ip_addr='{}', mode='UDP' where no={}".format(camera_ip, cam_no)
+cur.execute(sql)
+connect.commit()
+connect.close()
+
+# request port to server
+MQTT = mqtt.Client('camera'+str(cam_no))
+MQTT.connect(broker_ip, mqtt_port)
+MQTT.on_message = on_message
+MQTT.subscribe('server/camera/{}/port'.format(cam_no))
+
+while udp_port is None:
+    MQTT.loop_start()
+    MQTT.publish('camera/{}/port_request'.format(cam_no), str(camera_ip))
+    print('camera/{}/port_request'.format(cam_no), str(camera_ip))
+    time.sleep(0.5)
+MQTT.loop_stop()
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+cap = cv2.VideoCapture(0)
+ret, frame = cap.read()
+
+while ret:
+    try:
+        retval, buffer = cv2.imencode(".jpg", frame)
+        if retval:
+            # convert to byte array
+            buffer = buffer.tobytes()
+            buffer_size = len(buffer)
+
+            num_of_packs = 1
+            if buffer_size > max_length:
+                num_of_packs = math.ceil(buffer_size/max_length)
+
+            frame_info = {"packs":num_of_packs}
+
+            # send the number of packs to be expected
+            print("number of packs: ", num_of_packs)
+            sock.sendto(pickle.dumps(frame_info), (server_ip, udp_port))
+
+            left = 0
+            right = max_length
+
+            for i in range(num_of_packs):
+                print("left: ", left)
+                print("right: ", right)
+
+                # truncate data to send
+                data = buffer[left:right]
+                left = right
+                right += max_length
+
+                # send the frames accordingly
+                sock.sendto(data, (server_ip, udp_port))
+
+            ret, frame = cap.read()
+    except:
+        continue
+
+print('done')
+
